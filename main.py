@@ -2,6 +2,14 @@ import argparse
 import cv2
 import torch
 import os
+
+# PyTorch Security Patch Wrapper
+import ultralytics
+try:
+    torch.serialization.add_safe_globals([ultralytics.nn.tasks.DetectionModel])
+except AttributeError:
+    pass
+
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from src.analytics import ThreatHeatmap
@@ -27,31 +35,29 @@ def main():
 
     cap = cv2.VideoCapture(args.input)
     width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps, total_frames = cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
     out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
 
-    # Initialize Pro Modules
     heatmap_tracker = ThreatHeatmap(width, height)
     db_logger = ThreatDatabaseLogger(os.path.join("data", "threat_logs.db"), os.path.join("data", "crops"))
 
     frame_count = 0
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: break
+        if not ret: 
+            break
         frame_count += 1
         
-        # 1. Inference
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result = get_sliced_prediction(
             rgb_frame, model, slice_height=512, slice_width=512,
             overlap_height_ratio=0.2, overlap_width_ratio=0.2, verbose=0
         )
 
-        # 2. Update Heatmap
         heatmap_tracker.update_threats(result.object_prediction_list)
 
-        # 3. Draw & Log
         for pred in result.object_prediction_list:
             b = pred.bbox
             x1, y1, x2, y2 = int(b.minx), int(b.miny), int(b.maxx), int(b.maxy)
@@ -61,11 +67,11 @@ def main():
             
             db_logger.log_threat(frame, (x1, y1, x2, y2), pred.category.name, pred.score.value)
 
-        # 4. Apply Heatmap
         frame = heatmap_tracker.apply_heatmap_overlay(frame)
         out.write(frame)
         
-        if frame_count % 30 == 0: print(f"[PROFILER] Processed {frame_count}/{total_frames}")
+        if frame_count % 30 == 0: 
+            print(f"[PROFILER] Processed {frame_count}/{total_frames}")
 
     cap.release()
     out.release()
