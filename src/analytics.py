@@ -21,9 +21,6 @@ class ThreatHeatmap:
         heat_clipped = np.clip(self.accumulation_matrix, 0, 255).astype(np.uint8)
         heat_blurred = cv2.GaussianBlur(heat_clipped, (75, 75), 0)
         color_heatmap = cv2.applyColorMap(heat_blurred, cv2.COLORMAP_JET)
-        
-        # Mask logic for clean overlay
         mask = (heat_blurred > 10)[..., np.newaxis]
         overlay = np.where(mask, (frame * (1 - alpha) + color_heatmap * alpha).astype(np.uint8), frame)
-        
         return overlay

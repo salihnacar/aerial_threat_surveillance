@@ -2,14 +2,6 @@ import argparse
 import cv2
 import torch
 import os
-
-# PyTorch Security Patch Wrapper
-import ultralytics
-try:
-    torch.serialization.add_safe_globals([ultralytics.nn.tasks.DetectionModel])
-except AttributeError:
-    pass
-
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from src.analytics import ThreatHeatmap
@@ -46,8 +38,7 @@ def main():
     frame_count = 0
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: 
-            break
+        if not ret: break
         frame_count += 1
         
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -64,14 +55,12 @@ def main():
             
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
             cv2.putText(frame, pred.category.name, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-            
             db_logger.log_threat(frame, (x1, y1, x2, y2), pred.category.name, pred.score.value)
 
         frame = heatmap_tracker.apply_heatmap_overlay(frame)
         out.write(frame)
         
-        if frame_count % 30 == 0: 
-            print(f"[PROFILER] Processed {frame_count}/{total_frames}")
+        if frame_count % 30 == 0: print(f"[PROFILER] Processed {frame_count}/{total_frames}")
 
     cap.release()
     out.release()

@@ -7,7 +7,6 @@ class ThreatDatabaseLogger:
     def __init__(self, db_path, crop_dir):
         self.db_path = db_path
         self.crop_dir = crop_dir
-        
         os.makedirs(self.crop_dir, exist_ok=True)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         
@@ -25,7 +24,6 @@ class ThreatDatabaseLogger:
 
     def log_threat(self, frame, bbox_coords, label, confidence, cooldown_seconds=2.0):
         current_time = datetime.now()
-        
         if label in self.last_log_time:
             if (current_time - self.last_log_time[label]).total_seconds() < cooldown_seconds:
                 return
@@ -46,7 +44,6 @@ class ThreatDatabaseLogger:
             INSERT INTO threats (timestamp, label, confidence, bbox, image_path)
             VALUES (?, ?, ?, ?, ?)
         ''', (current_time.strftime("%Y-%m-%d %H:%M:%S"), label, confidence, bbox_str, crop_path))
-        
         self.conn.commit()
         self.last_log_time[label] = current_time
         print(f"[DATABASE] Logged {label} ({confidence:.2f}) to {crop_path}")
