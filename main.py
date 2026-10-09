@@ -2,6 +2,13 @@ import argparse
 import cv2
 import torch
 import os
+
+import ultralytics
+try:
+    torch.serialization.add_safe_globals([ultralytics.nn.tasks.DetectionModel])
+except AttributeError:
+    pass
+
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from src.analytics import ThreatHeatmap
@@ -10,19 +17,22 @@ from src.logger import ThreatDatabaseLogger
 def get_args():
     parser = argparse.ArgumentParser(description="Aerial Drone Surveillance Pipeline")
     parser.add_argument("--input", type=str, default=os.path.join("data", "input", "input.mp4"))
-    parser.add_argument("--output", type=str, default=os.path.join("data", "output", "output.mp4"))
+    # FIX 1: Change output to .avi for Linux compatibility
+    parser.add_argument("--output", type=str, default=os.path.join("data", "output", "output.avi"))
     parser.add_argument("--weights", type=str, default="yolov8s.pt")
     parser.add_argument("--device", type=str, default="cuda:0")
     return parser.parse_args()
 
 def main():
     args = get_args()
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    
     device = args.device if torch.cuda.is_available() and "cuda" in args.device else "cpu"
     print(f"[SYSTEM] Initializing on {device.upper()}")
 
     model = AutoDetectionModel.from_pretrained(
         model_type='yolov8', model_path=args.weights,
-        confidence_threshold=0.3, device=device
+        confidence_threshold=0.4, device=device # Slightly higher confidence to ignore bad crops
     )
 
     cap = cv2.VideoCapture(args.input)
@@ -30,7 +40,8 @@ def main():
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+    # FIX 2: Use XVID codec which is 100% stable on Colab
+    out = cv2.VideoWriter(args.output, cv2.VideoWriter_fourcc(*'XVID'), fps, (width, height))
 
     heatmap_tracker = ThreatHeatmap(width, height)
     db_logger = ThreatDatabaseLogger(os.path.join("data", "threat_logs.db"), os.path.join("data", "crops"))
@@ -38,13 +49,18 @@ def main():
     frame_count = 0
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: break
+        if not ret: 
+            break
         frame_count += 1
         
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # FIX 3: Increase slice size and overlap to prevent "Boundary Effect" on large objects
         result = get_sliced_prediction(
-            rgb_frame, model, slice_height=512, slice_width=512,
-            overlap_height_ratio=0.2, overlap_width_ratio=0.2, verbose=0
+            rgb_frame, model, 
+            slice_height=640, slice_width=640,
+            overlap_height_ratio=0.4, overlap_width_ratio=0.4, 
+            verbose=0
         )
 
         heatmap_tracker.update_threats(result.object_prediction_list)
@@ -55,12 +71,14 @@ def main():
             
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
             cv2.putText(frame, pred.category.name, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+            
             db_logger.log_threat(frame, (x1, y1, x2, y2), pred.category.name, pred.score.value)
 
         frame = heatmap_tracker.apply_heatmap_overlay(frame)
         out.write(frame)
         
-        if frame_count % 30 == 0: print(f"[PROFILER] Processed {frame_count}/{total_frames}")
+        if frame_count % 30 == 0: 
+            print(f"[PROFILER] Processed {frame_count}/{total_frames}")
 
     cap.release()
     out.release()
